@@ -1,39 +1,69 @@
+import json
 import os
+import urllib.error
+import urllib.request
 
-# Mock ChatGroq class to simulate the real langchain-groq behavior
+from dotenv import load_dotenv
+
+load_dotenv()
+
 class ChatGroq:
-    """Mock ChatGroq class for educational purposes."""
+    """ChatGroq client that sends the prompt to Groq."""
     
     def __init__(self, model, temperature=0, max_retries=2):
         self.model = model
         self.temperature = temperature
         self.max_retries = max_retries
         self.valid_models = [
-            "llama-3.1-8b-instant",
-            "llama-3.3-70b-versatile",
-            "llama-4-8b-instant",
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.8-27b",
         ]
         
         if model not in self.valid_models:
             raise ValueError(f"Invalid model: {model}")
     
     def invoke(self, messages):
-        """Mock invoke method that returns a simulated response."""
+        """Send the prompt to Groq and return the model response."""
         if not isinstance(messages, list) or len(messages) == 0:
             raise ValueError("Messages must be a non-empty list")
-        
-        # Simulate different responses based on model and temperature
-        if self.model == "llama-4-8b-instant":
-            content = f"[Llama 4 Response] Machine learning is a subset of AI that enables computers to learn patterns from data without explicit programming."
-        elif self.model == "llama-3.3-70b-versatile":
-            if self.temperature > 0.2:
-                content = f"[Llama 3.3 Creative Response] Machine learning is like teaching a computer to recognize patterns in data, much like how humans learn from experience!"
-            else:
-                content = f"[Llama 3.3 Response] Machine learning allows computers to learn and improve from data without being explicitly programmed."
-        else:
-            content = f"[Mock Response] This is a simulated response from {self.model}"
-        
-        return MockAIMessage(content)
+
+        prompt = messages[-1]
+        if isinstance(prompt, dict):
+            prompt = prompt.get("content", "")
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            raise Exception("GROQ_API_KEY environment variable is required")
+
+        payload = json.dumps({
+            "model": self.model,
+            "temperature": self.temperature,
+            "messages": [{"role": "user", "content": str(prompt)}],
+        }).encode()
+        request = urllib.request.Request(
+            "https://api.groq.com/openai/v1/chat/completions",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "langchain-course/0.1.0",
+            },
+            method="POST",
+        )
+
+        last_error = None
+        for _ in range(self.max_retries + 1):
+            try:
+                with urllib.request.urlopen(request) as response:
+                    body = json.loads(response.read().decode())
+                content = body["choices"][0]["message"]["content"]
+                return MockAIMessage(content)
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode()
+                last_error = Exception(f"Groq request failed ({error.code}): {detail}")
+            except urllib.error.URLError as error:
+                last_error = Exception(f"Groq request failed: {error.reason}")
+        raise last_error
 
 class MockAIMessage:
     """Mock AI message response."""
@@ -64,22 +94,13 @@ def check_api_key():
     return os.environ.get("GROQ_API_KEY")
 
 
-def implement_llama_4_model():
-    """
-    IMPLEMENT: Create and return a ChatGroq instance for Llama 4.
-    Use the exact model name from console.groq.com
-    Set temperature=0 for consistent responses
-    """
-    return ChatGroq(model="llama-4-8b-instant", temperature=0)
-
-
 def implement_llama_3_3_model():
     """
-    IMPLEMENT: Create and return a ChatGroq instance for Llama 3.3.
-    Use the exact model name from console.groq.com
-    Set for slightly more creative responses
+    IMPLEMENT: Create and return a ChatGroq instance.
+    Use a model id this Groq account can access.
+    Set temperature=0 for consistent responses.
     """
-    return ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+    return ChatGroq(model="openai/gpt-oss-120b", temperature=0)
 
 
 def implement_query_model(model, prompt):
@@ -99,19 +120,17 @@ def implement_query_model(model, prompt):
 
 def implement_compare_models(prompt):
     """
-    IMPLEMENT: Query both models and return a dictionary with both responses.
+    IMPLEMENT: Query the Llama 3.3 model and return its response.
     
     Args:
-        prompt: The text prompt to send to both models
+        prompt: The text prompt to send
         
     Returns:
-        dict: Dictionary with responses from both models
+        dict: Dictionary with the Llama 3.3 response
     """
-    llama4 = implement_llama_4_model()
     llama33 = implement_llama_3_3_model()
     return {
-        "llama-4-8b-instant": implement_query_model(llama4, prompt),
-        "llama-3.3-70b-versatile": implement_query_model(llama33, prompt),
+        "openai/gpt-oss-120b": implement_query_model(llama33, prompt),
     }
 
 
@@ -128,7 +147,9 @@ def main():
     try:
         # Test your set_api_key implementation
         print("🔑 Setting API key...")
-        api_key = os.environ.get("GROQ_API_KEY")
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise Exception("GROQ_API_KEY environment variable is required")
         implement_set_api_key(api_key)
         
         # Check if API key was set correctly
@@ -136,18 +157,13 @@ def main():
         print("✓ API key validation working!")
         
         # Test prompt
-        test_prompt = "Explain the concept of machine learning in one sentence."
+        test_prompt = "List 5 cool things about programming."
         
-        # Test your model implementations
-        print(f"\n🤖 Testing your Llama 4 implementation:")
-        llama4 = implement_llama_4_model()
-        response4 = implement_query_model(llama4, test_prompt)
-        print(f"Llama 4: {response4}\n")
-        
-        print(f"🤖 Testing your Llama 3.3 implementation:")
+        # Test your model implementation
+        print(f"\n🤖 Testing your model implementation:")
         llama33 = implement_llama_3_3_model()
         response33 = implement_query_model(llama33, test_prompt)
-        print(f"Llama 3.3: {response33}\n")
+        print(f"Response: {response33}\n")
         
         # Test your comparison implementation
         print("🔄 Testing your model comparison:")
